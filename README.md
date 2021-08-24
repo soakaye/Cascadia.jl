@@ -1,3 +1,5 @@
+FOR UNICODE
+
 # Cascadia
 
 [![Build Status](https://travis-ci.org/Algocircle/Cascadia.jl.svg?branch=master)](https://travis-ci.org/Algocircle/Cascadia.jl)
