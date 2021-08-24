@@ -9,10 +9,10 @@ Parser(s) = Parser(String(s), 1)
 
 # // parseEscape parses a backslash escape.
 function parseEscape(p::Parser)
-  if length(p.s) < p.i+2 || p.s[p.i] != '\\'
+  if lastindex(p.s) < p.i+2 || p.s[p.i] != '\\'
     parseError(p, "invalid escape sequence")
   end
-  start = p.i + 1
+  start = nextind(p.s, p.i, 1)
   c = p.s[start]
 
   if  c == '\r' || c == '\n' || c == '\f'
@@ -21,18 +21,18 @@ function parseEscape(p::Parser)
 	  # unicode escape (hex)
 	  local i
 	  i = start
-	  while  i < p.i+6 && i <= length(p.s) && hexDigit(p.s[i])
-		  i += 1
+	  while  i < p.i+6 && i <= lastindex(p.s) && hexDigit(p.s[i])
+		  i = nextind(p.s, i, 1)
 	  end
 	  v = parse(UInt, p.s[start:i], base=16)
-	  if length(p.s) >= i
+	  if lastindex(p.s) >= i
 		  if  p.s[i] == '\r'
-			  i += 1
-			  if length(p.s) >= i && p.s[i] == '\n'
-				  i += 1
+			  i = nextind(p.s, i, 1)
+			  if lastindex(p.s) >= i && p.s[i] == '\n'
+				  i = nextind(p.s, i, 1)
 			  end
 		  elseif  p.s[i] == ' ' || p.s[i] == '\t' || p.s[i] == '\n' || p.s[i] == '\f'
-			  i += 1
+			  i = nextind(p.s, i, 1)
 		  end
 	  end
 	  p.i = i
@@ -41,7 +41,7 @@ function parseEscape(p::Parser)
 
   #Return the literal character after the backslash.
   result = p.s[start : start]
-  p.i += 2
+  p.i = nextind(p.s, p.i , 2)
   return result
 
 end
@@ -66,11 +66,11 @@ nameChar(c::Char) = 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '_' || 
 #// parseIdentifier parses an identifier.
 function parseIdentifier(p::Parser) #->String
 	startingDash=false
-	if length(p.s) >= p.i && p.s[p.i] == '-'
+	if lastindex(p.s) >= p.i && p.s[p.i] == '-'
 		startingDash = true
-		p.i = p.i + 1
+		p.i = nextind(p.s, p.i, 1)
 	end
-	if length(p.s) < p.i ; parseError(p, "expected identifier, found EOF instead"); end
+	if lastindex(p.s) < p.i ; parseError(p, "expected identifier, found EOF instead"); end
 	c = p.s[p.i]
 	if !(nameStart(c) || c == '\\'); parseError(p, "expected identifier, found $c instead"); end
 	result = parseName(p)
@@ -87,14 +87,14 @@ end
 function parseName(p::Parser) #->String
 	i = p.i
 	result = ""
-	while i <= length(p.s)
+	while i <= lastindex(p.s)
 		c = p.s[i]
 		if nameChar(c)
 			start = i
-			while i <= length(p.s) && nameChar(p.s[i])
-				i += 1
+			while i <= lastindex(p.s) && nameChar(p.s[i])
+				i = nextind(p.s, i, 1)
 			end
-			result = result * p.s[start:i-1]
+			result = result * p.s[start:prevind(p.s, i, 1)]
 		elseif c == '\\'
 			p.i = i
 			val = parseEscape(p)
@@ -116,24 +116,24 @@ end
 #// parseString parses a single- or double-quoted string.
 function parseString(p::Parser) #-> String
 	i = p.i
-	if length(p.s) < i + 2
+	if lastindex(p.s) < i + 2
 		parseError(p, "expected string, found EOF instead")
 	end
 	qt = p.s[i]
-	i = i+1
+	i = nextind(p.s, i, 1)
 	result = ""
-	while i <= length(p.s)
+	while i <= lastindex(p.s)
 		if  p.s[i]  ==  '\\'
-			if length(p.s) > i+1
+			if lastindex(p.s) > i+1
 				c = p.s[i+1]
 				if p.s[i+1] == '\r'
-					if length(p.s) > i+2 && p.s[i+2] == '\n'
-						i += 3
+					if lastindex(p.s) > i+2 && p.s[i+2] == '\n'
+						i = nextind(p.s, i, 3)
 						continue
 					end
 				end
 				if p.s[i+1] == '\n' || p.s[i+1] == '\f'
-					i += 2
+					i = nextind(p.s, i, 2)
 					continue
 				end
 			end
@@ -147,22 +147,22 @@ function parseString(p::Parser) #-> String
 			parseError(p, "unexpected end of line in string")
 		else
 			start = i
-			while i <= length(p.s)
+			while i <= lastindex(p.s)
 				c = p.s[i]
 				if c == qt || c == '\\' || c == '\r' || c == '\n' || c == '\f'
 					break
 				end
-				i += 1
+				i = nextind(p.s, i, 1)
 			end
-			result = result *  p.s[start:i-1]
+			result = result *  p.s[start:prevind(p.s, i)]
 		end
 	end
-	if i >= length(p.s)+1
+	if i >= lastindex(p.s)+1
 		parseError(p, "EOF in string")
 	end
 
 	#// Consume the final quote.
-	i += 1
+	i = nextind(p.s, i, 1)
 
 	p.i = i
 	return result
@@ -174,13 +174,13 @@ end
 #// unmatched closing ')' or ']' which is not consumed
 function parseRegex(p::Parser) #-> Regex
 	i = p.i
-	if length(p.s) < i+2
+	if lastindex(p.s) < i+2
 		parseError(p, "expected regular expression, found EOF instead")
 	end
 	#number of open parens or brackets;
 	#when it becomes negative, finished parsing regex
 	open=0
-	while i <= length(p.s)
+	while i <= lastindex(p.s)
 		if p.s[i] == '(' || p.s[i] == '['
 			open += 1
 		elseif p.s[i] == ')' || p.s[i] == ']'
@@ -191,10 +191,10 @@ function parseRegex(p::Parser) #-> Regex
 		end
 		i += 1
 	end
-	if i > length(p.s)
+	if i > lastindex(p.s)
 		parseError(p, "EOF in regular expression")
 	end
-	rx = Regex(p.s[p.i:i-1])
+	rx = Regex(p.s[p.i:prevind(p.s, i, 1)])
 	p.i=i
 	return rx
 end
@@ -205,13 +205,13 @@ end
 #// It returns true if there was actually anything to skip.
 function skipWhitespace(p::Parser) #->boolean
 	i = p.i
-	while i <= length(p.s)
+	while i <= lastindex(p.s)
 		if p.s[i] == ' ' || p.s[i] == '\t' || p.s[i] == '\r' || p.s[i] == '\n' || p.s[i] == '\f'
-			i += 1
+			i = nextind(p.s, i, 1)
 			continue
 		elseif p.s[i] == '/'
 			if startswith(p.s[p.i:end], "/*")
-				ends,endl = something(findnext("*/", p.s, i+length("/*")), 0:-1)
+				ends,endl = something(findnext("*/", p.s, i+lastindex("/*")), 0:-1)
 				if endl != -1
 					i = endl+1
 					continue
@@ -232,8 +232,8 @@ end
 #// consumeParenthesis consumes an opening parenthesis and any following
 #// whitespace. It returns true if there was actually a parenthesis to skip.
 function consumeParenthesis(p::Parser) #->boolean
-	if p.i <= length(p.s) && p.s[p.i] == '('
-		p.i += 1
+	if p.i <= lastindex(p.s) && p.s[p.i] == '('
+		p.i = nextind(p.s, p.i , 1)
 		skipWhitespace(p)
 		return true
 	end
@@ -247,8 +247,8 @@ end
 function consumeClosingParenthesis(p::Parser) #->boolean
 	i=p.i
 	skipWhitespace(p)
-	if p.i<=length(p.s) && p.s[p.i]==')'
-		p.i += 1
+	if p.i<=lastindex(p.s) && p.s[p.i]==')'
+		p.i = nextind(p.s, p.i , 1)
 		return true
 	end
 	p.i = i
@@ -267,13 +267,13 @@ end
 
 #// parseIDSelector parses a selector that matches by id attribute.
 function parseIDSelector(p::Parser)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "expected class selector (.class), found EOF instead")
 	end
 	if p.s[p.i] != '#'
 		parseError(p, "expected id selector (#id), found '$(p.s[p.i])' instead")
 	end
-	p.i += 1
+	p.i = nextind(p.s, p.i , 1)
 	id  = parseName(p)
 
 	return attributeEqualsSelector("id", id)
@@ -283,14 +283,14 @@ end
 
 #// parseClassSelector parses a selector that matches by class attribute.
 function parseClassSelector(p::Parser) #-> Selector
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "expected class selector (.class), found EOF instead")
 	end
 	if p.s[p.i] != '.'
 		parseError(p, "expected class selector (.class), found '$(p.s[p.i])' instead")
 	end
 
-	p.i += 1
+	p.i = nextind(p.s, p.i , 1)
 	class  = parseIdentifier(p)
 
 	return attributeIncludesSelector("class", class)
@@ -300,7 +300,7 @@ end
 
 #// parseAttributeSelector parses a selector that matches by attribute value.
 function parseAttributeSelector(p) #-> Selector
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "expected attribute selector ([attribute]), found EOF instead")
 	end
 	if p.s[p.i] != '['
@@ -310,26 +310,26 @@ function parseAttributeSelector(p) #-> Selector
 	skipWhitespace(p)
 	key = parseIdentifier(p)
 	skipWhitespace(p)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "unexpected EOF in attribute selector")
 	end
 	if p.s[p.i] == ']'
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		return attributeExistsSelector(key)
 	end
-	if p.i+2 > length(p.s)
+	if p.i+2 > lastindex(p.s)
 		parseError(p, "unexpected EOF in attribute selector")
 	end
-	op = p.s[p.i : p.i+1]
+	op = p.s[p.i : nextind(p.s, p.i, 1)]
 	if op[1] == '='
 		op = "="
 	elseif op[2] != '='
 		parseError(p, "expected equality operator, found '$op' instead")
 	end
-	p.i += length(op)
+	p.i += lastindex(op)
 
 	skipWhitespace(p)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "unexpected EOF in attribute selector")
 	end
 	local val
@@ -345,13 +345,13 @@ function parseAttributeSelector(p) #-> Selector
 	end
 
 	skipWhitespace(p)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "unexpected EOF in attribute selector")
 	end
 	if p.s[p.i] != ']'
 		parseError(p, "expected ']', found '$(p.s[p.i])' instead" )
 	end
-	p.i += 1
+	p.i = nextind(p.s, p.i , 1)
 
 	if op == "="
 		return attributeEqualsSelector(key, val)
@@ -381,13 +381,13 @@ const unmatchedParenthesis = "unmatched '('"
 
 #// parsePseudoclassSelector parses a pseudoclass selector like :not(p).
 function parsePseudoclassSelector(p::Parser) #-> Selector
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "expected pseudoclass selector (:pseudoclass), found EOF instead")
 	end
 	if p.s[p.i] != ':'
 		parseError(p, "expected attribute selector (:pseudoclass), found '$(p.s[p.i])' instead")
 	end
-	p.i += 1
+	p.i = nextind(p.s, p.i , 1)
 	name = parseIdentifier(p)
 	name = lowercase(name)
 
@@ -410,7 +410,7 @@ function parsePseudoclassSelector(p::Parser) #-> Selector
 		if !consumeParenthesis(p)
 			parseError(p, expectedParenthesis)
 		end
-		if p.i > length(p.s)
+		if p.i > lastindex(p.s)
 			parseError(p, unmatchedParenthesis)
 		end
 		val = ""
@@ -422,7 +422,7 @@ function parsePseudoclassSelector(p::Parser) #-> Selector
 
 		val = lowercase(val)
 		skipWhitespace(p)
-		if p.i > length(p.s)
+		if p.i > lastindex(p.s)
 			parseError(p, "unexpected EOF in pseudo selector")
 		end
 		if !consumeClosingParenthesis(p)
@@ -440,7 +440,7 @@ function parsePseudoclassSelector(p::Parser) #-> Selector
 		end
 		rx  = parseRegex(p)
 
-		if p.i > length(p.s)
+		if p.i > lastindex(p.s)
 			parseError(p, "unexpected EOF in pseudo selector")
 		end
 		if !consumeClosingParenthesis(p)
@@ -489,8 +489,8 @@ end
 function parseInteger(p) #-> Int
 	i = p.i
 	start = i
-	while i <= length(p.s) && '0' <= p.s[i] && p.s[i] <= '9'
-		i += 1
+	while i <= lastindex(p.s) && '0' <= p.s[i] && p.s[i] <= '9'
+		i = nextind(p.s, i , 1)
 	end
 	if i==start
 		parseError(p, "expected integer, but didn't find it.")
@@ -504,12 +504,12 @@ end
 
 # // parseNth parses the argument for :nth-child (normally of the form an+b).
 function parseNth(p::Parser) # -> (a,b)::(Int, Int)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		@goto eof
 	end
 	c=p.s[p.i]
 	if c == '-'
-		p.i+= 1
+		p.i = nextind(p.s, p.i , 1)
 		@goto negativeA
 	elseif c == '+'
 		p.i+= 1
@@ -518,7 +518,7 @@ function parseNth(p::Parser) # -> (a,b)::(Int, Int)
 		@goto positiveA
 	elseif c=='n'||c=='N'
 		a=1
-		p.i+= 1
+		p.i = nextind(p.s, p.i , 1)
 		@goto readN
 	elseif c=='o'||c=='O'||c=='e'||c=='E'
 		id = parseName(p)
@@ -534,7 +534,7 @@ function parseNth(p::Parser) # -> (a,b)::(Int, Int)
 	end
 
 	@label positiveA
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		@goto eof
 	end
 	c=p.s[p.i]
@@ -544,14 +544,14 @@ function parseNth(p::Parser) # -> (a,b)::(Int, Int)
 		@goto readA
 	elseif c=='n'||c=='N'
 		a = 1
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		@goto readN
 	else
 		@goto invalid
 	end
 
 	@label negativeA
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		@goto eof
 	end
 	c=p.s[p.i]
@@ -561,19 +561,19 @@ function parseNth(p::Parser) # -> (a,b)::(Int, Int)
 		@goto readA
 	elseif c=='n'||c=='N'
 		a = -1
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		@goto readN
 	else
 		@goto invalid
 	end
 
 	@label readA
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		@goto eof
 	end
 	c=p.s[p.i]
 	if c=='n'||c=='N'
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		@goto readN
 	else
 		#// The number we read as a is actually b.
@@ -582,17 +582,17 @@ function parseNth(p::Parser) # -> (a,b)::(Int, Int)
 
 	@label readN
 	skipWhitespace(p)
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		@goto eof
 	end
 	c=p.s[p.i]
 	if c == '+'
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		skipWhitespace(p)
 		b = parseInteger(p)
 		return a, b
 	elseif c ==  '-'
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		skipWhitespace(p)
 		b = parseInteger(p)
 		return a, -b
@@ -614,20 +614,20 @@ end
 # // a single element.
 function parseSimpleSelectorSequence(p::Parser) #-> Selector
 	result = nothing
-	if p.i > length(p.s)
+	if p.i > lastindex(p.s)
 		parseError(p, "expected selector, found EOF instead")
 	end
 	c = p.s[p.i]
 	if c == '*'
 		#// It's the universal selector. Just skip over it, since it doesn't affect the meaning.
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 	elseif c=='#' || c=='.' || c=='[' || c==':'
 		#// There's no type selector. Wait to process the other till the main loop.
 	else
 		r = parseTypeSelector(p)
 		result = r
 	end
-	while p.i <= length(p.s)
+	while p.i <= lastindex(p.s)
 		c=p.s[p.i]
 		if c == '#'
 			ns  = parseIDSelector(p)
@@ -640,13 +640,13 @@ function parseSimpleSelectorSequence(p::Parser) #-> Selector
 		else
 			break
 		end
-		if result == nothing
+		if result === nothing
 			result = ns
 		else
 			result = intersectionSelector(result, ns)
 		end
 	end
-	if result == nothing
+	if result === nothing
 		result = trueSelector()
 	end
 	return result
@@ -662,13 +662,13 @@ function parseSelector(p::Parser) # -> Selector
 		if skipWhitespace(p)
 			combinator = ' '
 		end
-		if p.i > length(p.s)
+		if p.i > lastindex(p.s)
 			return result
 		end
 		c = p.s[p.i]
 		if c == '+' || c == '>' || c =='~'
 			combinator = p.s[p.i]
-			p.i += 1
+			p.i = nextind(p.s, p.i , 1)
 			skipWhitespace(p)
 		elseif c == ',' || c==')'
 			# // These characters can't begin a selector, but they can legally occur after one.
@@ -694,11 +694,11 @@ end
 #// parseSelectorGroup parses a group of selectors, separated by commas.
 function parseSelectorGroup(p::Parser) # -> Selector
 	result = parseSelector(p)
-	while p.i <= length(p.s)
+	while p.i <= lastindex(p.s)
 		if p.s[p.i] != ','
 			return result
 		end
-		p.i += 1
+		p.i = nextind(p.s, p.i , 1)
 		c=parseSelector(p)
 		result =  unionSelector(result, c)
 	end
